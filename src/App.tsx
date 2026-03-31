@@ -46,11 +46,27 @@ export default function App() {
 
   const quickSpeeds = [0.5, 1.0, 1.25, 1.5, 2.0];
 
-  // Load saved settings on mount
+  // Load settings on mount: prefer the actual video speed from the content script,
+  // fall back to the stored value if the content script is not available.
   useEffect(() => {
-    chrome.storage.sync.get(['speed', 'isEnabled'], (result) => {
-      if (result.speed != null) setSpeed(result.speed);
+    chrome.storage.sync.get(['speed', 'isEnabled'], async (result) => {
+      // Apply stored enabled state immediately
       if (result.isEnabled != null) setIsEnabled(result.isEnabled);
+
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id != null) {
+          const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_SPEED' });
+          if (response?.speed != null) {
+            setSpeed(response.speed);
+            return; // Use the live video speed, skip storage value
+          }
+        }
+      } catch {
+        // Content script not injected on this page – fall back to stored value
+      }
+
+      if (result.speed != null) setSpeed(result.speed);
     });
   }, []);
 
