@@ -1,0 +1,55 @@
+name: Build & Release Extension
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-release:
+    name: Build extension and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed to create releases and upload assets
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build extension
+        run: pnpm run build
+
+      - name: Generate version tag (UTC timestamp)
+        id: version
+        run: echo "tag=v$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+      - name: Zip dist folder
+        run: |
+          cd dist
+          zip -r ../speedvideo-${{ steps.version.outputs.tag }}.zip .
+          cd ..
+
+      - name: Create GitHub Release and upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: SpeedVideo ${{ steps.version.outputs.tag }}
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            **Branch:** `${{ github.ref_name }}`
+            **Built at:** ${{ steps.version.outputs.tag }}
+          files: speedvideo-${{ steps.version.outputs.tag }}.zip
+          make_latest: true
