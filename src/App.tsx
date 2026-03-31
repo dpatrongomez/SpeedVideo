@@ -3,19 +3,41 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
-import { 
-  Gauge, 
-  User, 
-  Settings, 
-  BarChart3, 
-  Globe, 
-  Zap, 
-  History 
+import { useState, useEffect, type ReactNode } from 'react';
+import {
+  Gauge,
+  User,
+  Settings,
+  BarChart3,
+  Globe,
+  Zap,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 type Tab = 'speed' | 'settings' | 'stats' | 'domains';
+
+/** Format a speed value with the minimum necessary decimals.
+ * 1    → "1.0"  |  1.5 → "1.5"  |  1.25 → "1.25" */
+const formatSpeed = (s: number) => {
+  const fixed2 = parseFloat(s.toFixed(2));
+  if (fixed2 % 1 === 0) return fixed2.toFixed(1);        // whole number → "1.0"
+  if (Math.round(fixed2 * 10) === fixed2 * 10) return fixed2.toFixed(1); // 1 decimal → "1.5"
+  return fixed2.toFixed(2);                              // 2 decimals → "1.25"
+};
+
+
+// Helper to send a message to the active tab's content script
+async function sendToActiveTab(message: Record<string, unknown>) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id != null) {
+      await chrome.tabs.sendMessage(tab.id, message);
+    }
+  } catch {
+    // Tab may not have a content script (e.g. chrome:// pages) – silently ignore
+  }
+}
 
 export default function App() {
   const [speed, setSpeed] = useState(1.5);
@@ -24,27 +46,51 @@ export default function App() {
 
   const quickSpeeds = [0.5, 1.0, 1.25, 1.5, 2.0];
 
+  // Load saved settings on mount
+  useEffect(() => {
+    chrome.storage.sync.get(['speed', 'isEnabled'], (result) => {
+      if (result.speed != null) setSpeed(result.speed);
+      if (result.isEnabled != null) setIsEnabled(result.isEnabled);
+    });
+  }, []);
+
+  // When speed changes: persist and apply to active tab
+  const handleSpeedChange = (newSpeed: number) => {
+    setSpeed(newSpeed);
+    chrome.storage.sync.set({ speed: newSpeed });
+    sendToActiveTab({ type: 'SET_SPEED', speed: newSpeed });
+  };
+
+  // When enabled toggle changes
+  const handleToggleEnabled = () => {
+    const next = !isEnabled;
+    setIsEnabled(next);
+    chrome.storage.sync.set({ isEnabled: next });
+    sendToActiveTab({ type: 'SET_ENABLED', enabled: next });
+    if (next) {
+      sendToActiveTab({ type: 'SET_SPEED', speed });
+    }
+  };
+
   return (
     <div className="w-[350px] h-[550px] bg-surface flex flex-col overflow-hidden relative shadow-2xl border border-outline-variant/10">
       {/* Header */}
       <header className="flex justify-between items-center px-4 h-14 bg-surface-lowest/50 backdrop-blur-md z-10">
         <div className="flex items-center gap-2">
           <span className="text-lg font-extrabold text-primary font-headline tracking-tight">
-            Fluid Precision
+            SpeedVideo
           </span>
         </div>
         <div className="flex items-center gap-3">
           {/* Toggle Switch */}
-          <button 
-            onClick={() => setIsEnabled(!isEnabled)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
-              isEnabled ? 'bg-primary' : 'bg-surface-highest'
-            }`}
+          <button
+            onClick={handleToggleEnabled}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${isEnabled ? 'bg-primary' : 'bg-surface-highest'
+              }`}
           >
             <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                isEnabled ? 'translate-x-4' : 'translate-x-1'
-              }`}
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-1'
+                }`}
             />
           </button>
           <button className="text-on-surface-variant hover:text-primary transition-colors">
@@ -71,13 +117,13 @@ export default function App() {
                   Current Velocity
                 </span>
                 <div className="relative inline-block">
-                  <motion.span 
+                  <motion.span
                     key={speed}
                     initial={{ scale: 0.95, opacity: 0.8 }}
                     animate={{ scale: 1, opacity: 1 }}
                     className="text-7xl font-extrabold font-headline text-primary tracking-tighter"
                   >
-                    {speed.toFixed(1)}
+                    {formatSpeed(speed)}
                     <span className="text-2xl font-bold opacity-40 ml-1">x</span>
                   </motion.span>
                   {/* Abstract Glow */}
@@ -91,17 +137,17 @@ export default function App() {
                   <History size={14} className="text-on-surface-variant" />
                   <Zap size={14} className="text-on-surface-variant" />
                 </div>
-                
+
                 <input
                   type="range"
                   min="0.1"
                   max="5.0"
-                  step="0.1"
+                  step="0.05"
                   value={speed}
-                  onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                  onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
                   className="w-full cursor-pointer"
                 />
-                
+
                 <div className="flex justify-between mt-3">
                   <span className="text-[10px] font-semibold text-on-surface-variant/60">0.1x</span>
                   <span className="text-[10px] font-semibold text-on-surface-variant/60">1.0x</span>
@@ -114,14 +160,13 @@ export default function App() {
                 {quickSpeeds.map((val) => (
                   <button
                     key={val}
-                    onClick={() => setSpeed(val)}
-                    className={`py-3 rounded-xl text-xs font-bold transition-all duration-300 ${
-                      speed === val
-                        ? 'bg-primary text-white shadow-lg shadow-primary/20 scale-105'
-                        : 'bg-surface-low text-on-surface-variant hover:bg-surface-highest'
-                    }`}
+                    onClick={() => handleSpeedChange(val)}
+                    className={`py-3 rounded-xl text-xs font-bold transition-all duration-300 ${speed === val
+                      ? 'bg-primary text-white shadow-lg shadow-primary/20 scale-105'
+                      : 'bg-surface-low text-on-surface-variant hover:bg-surface-highest'
+                      }`}
                   >
-                    {val.toFixed(speed === 1.25 ? 2 : 1)}
+                    {formatSpeed(val)}
                   </button>
                 ))}
               </div>
@@ -161,7 +206,7 @@ export default function App() {
               </div>
             </motion.div>
           )}
-          
+
           {activeTab === 'stats' && (
             <motion.div
               key="stats"
@@ -175,7 +220,7 @@ export default function App() {
               </div>
               <h2 className="text-sm font-bold font-headline">Usage Analytics</h2>
               <p className="text-xs text-on-surface-variant px-4">
-                You've saved approximately <span className="text-primary font-bold">4.2 hours</span> of watch time this week by using Fluid Precision.
+                You've saved approximately <span className="text-primary font-bold">4.2 hours</span> of watch time this week by using SpeedVideo.
               </p>
             </motion.div>
           )}
@@ -210,55 +255,54 @@ export default function App() {
 
       {/* Navigation */}
       <nav className="absolute bottom-0 left-0 w-full bg-surface-lowest/80 backdrop-blur-xl border-t border-outline-variant/10 px-6 py-3 flex justify-between items-center">
-        <NavButton 
-          active={activeTab === 'speed'} 
-          onClick={() => setActiveTab('speed')} 
-          icon={<Gauge size={20} />} 
-          label="Speed" 
+        <NavButton
+          active={activeTab === 'speed'}
+          onClick={() => setActiveTab('speed')}
+          icon={<Gauge size={20} />}
+          label="Speed"
         />
-        <NavButton 
-          active={activeTab === 'settings'} 
-          onClick={() => setActiveTab('settings')} 
-          icon={<Settings size={20} />} 
-          label="Settings" 
+        <NavButton
+          active={activeTab === 'settings'}
+          onClick={() => setActiveTab('settings')}
+          icon={<Settings size={20} />}
+          label="Settings"
         />
-        <NavButton 
-          active={activeTab === 'stats'} 
-          onClick={() => setActiveTab('stats')} 
-          icon={<BarChart3 size={20} />} 
-          label="Stats" 
+        <NavButton
+          active={activeTab === 'stats'}
+          onClick={() => setActiveTab('stats')}
+          icon={<BarChart3 size={20} />}
+          label="Stats"
         />
-        <NavButton 
-          active={activeTab === 'domains'} 
-          onClick={() => setActiveTab('domains')} 
-          icon={<Globe size={20} />} 
-          label="Domains" 
+        <NavButton
+          active={activeTab === 'domains'}
+          onClick={() => setActiveTab('domains')}
+          icon={<Globe size={20} />}
+          label="Domains"
         />
       </nav>
     </div>
   );
 }
 
-function NavButton({ 
-  active, 
-  onClick, 
-  icon, 
-  label 
-}: { 
-  active: boolean; 
-  onClick: () => void; 
-  icon: React.ReactNode; 
-  label: string; 
+function NavButton({
+  active,
+  onClick,
+  icon,
+  label
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  label: string;
 }) {
   return (
-    <button 
+    <button
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 transition-all duration-300 relative ${
-        active ? 'text-primary' : 'text-on-surface-variant/40 hover:text-on-surface-variant'
-      }`}
+      className={`flex flex-col items-center gap-1 transition-all duration-300 relative ${active ? 'text-primary' : 'text-on-surface-variant/40 hover:text-on-surface-variant'
+        }`}
     >
       {active && (
-        <motion.div 
+        <motion.div
           layoutId="nav-active"
           className="absolute -inset-x-3 -inset-y-1 bg-primary/10 rounded-xl -z-10"
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
