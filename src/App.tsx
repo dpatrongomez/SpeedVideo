@@ -70,6 +70,17 @@ export default function App() {
     });
   }, []);
 
+  // Listen for speed changes from the content script (keyboard shortcuts)
+  useEffect(() => {
+    const handleMessage = (message: any) => {
+      if (message.type === 'SPEED_CHANGED' && typeof message.speed === 'number') {
+        setSpeed(message.speed);
+      }
+    };
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, []);
+
   // When speed changes: persist and apply to active tab
   const handleSpeedChange = (newSpeed: number) => {
     setSpeed(newSpeed);

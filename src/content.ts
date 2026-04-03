@@ -53,14 +53,38 @@ document.addEventListener('keydown', (e) => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
 
   if (e.key === 'd' || e.key === 'D') {
-    currentSpeed = Math.min(5.0, parseFloat((currentSpeed + 0.1).toFixed(1)));
+    currentSpeed = Math.min(5.0, parseFloat((currentSpeed + 0.05).toFixed(2)));
     if (isEnabled) applySpeedToVideos(currentSpeed);
-    // Notify popup of change
+    // Persist and notify other parts of the extension
+    chrome.storage.sync.set({ speed: currentSpeed });
     chrome.runtime.sendMessage({ type: 'SPEED_CHANGED', speed: currentSpeed }).catch(() => {});
   } else if (e.key === 's' || e.key === 'S') {
-    currentSpeed = Math.max(0.1, parseFloat((currentSpeed - 0.1).toFixed(1)));
+    currentSpeed = Math.max(0.1, parseFloat((currentSpeed - 0.05).toFixed(2)));
     if (isEnabled) applySpeedToVideos(currentSpeed);
+    chrome.storage.sync.set({ speed: currentSpeed });
     chrome.runtime.sendMessage({ type: 'SPEED_CHANGED', speed: currentSpeed }).catch(() => {});
+  }
+});
+
+/**
+ * Listen for storage changes (e.g., from other frames or the popup).
+ */
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync') {
+    if (changes.speed && typeof changes.speed.newValue === 'number' && changes.speed.newValue !== currentSpeed) {
+      currentSpeed = changes.speed.newValue;
+      if (isEnabled) applySpeedToVideos(currentSpeed);
+    }
+    if (changes.isEnabled && typeof changes.isEnabled.newValue === 'boolean') {
+      isEnabled = changes.isEnabled.newValue;
+      if (!isEnabled) {
+        document.querySelectorAll<HTMLVideoElement>('video').forEach((v) => {
+          v.playbackRate = 1.0;
+        });
+      } else {
+        applySpeedToVideos(currentSpeed);
+      }
+    }
   }
 });
 
